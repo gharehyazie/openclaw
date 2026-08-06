@@ -69,8 +69,6 @@ export type NativeHookRelayProcessResponse = {
 export type NativeHookRelayRegistration = {
   relayId: string;
   provider: NativeHookRelayProvider;
-  generationMismatchGraceExpiresAtMs?: number;
-  generationMismatchGraceAcceptedGeneration?: string;
   agentId?: string;
   sessionId: string;
   sessionKey?: string;
@@ -90,6 +88,28 @@ export type NativeHookRelayRegistration = {
   }) => void | Promise<void>;
 };
 
+/**
+ * The routing facts one attempt owns on a registration that outlives it. Everything
+ * omitted is worker-scoped and spawn-frozen: already-spawned workers name the relay id,
+ * generation, provider, and allowed events, so widening this Pick re-points them.
+ */
+export type NativeHookRelayAttemptBinding = Pick<
+  RegisterNativeHookRelayParams,
+  | "runId"
+  | "config"
+  | "channelId"
+  | "requester"
+  | "approvalContext"
+  | "signal"
+  | "onPreToolUseFailure"
+>;
+
+/**
+ * One invocation's frozen view of its registration, taken before the first await: adoption
+ * re-points attempt fields in place, so a live re-read would split one hook across attempts.
+ */
+export type NativeHookRelayInvocationBinding = Readonly<NativeHookRelayRegistration>;
+
 export type NativeHookRelayRegistrationHandle = NativeHookRelayRegistration & {
   generation?: string;
   shouldRelayEvent: (event: NativeHookRelayEvent) => boolean;
@@ -99,6 +119,12 @@ export type NativeHookRelayRegistrationHandle = NativeHookRelayRegistration & {
     options?: NativeHookRelayCommandForEventOptions,
   ) => string;
   renew: (ttlMs?: number) => void;
+  /**
+   * Re-points a live registration at the next attempt in place, preserving the worker
+   * approvals unregister clears. False means it is no longer live; the holder repairs.
+   * Optional so external constructors of this type keep compiling; core always provides it.
+   */
+  rebindAttempt?: (binding: NativeHookRelayAttemptBinding) => boolean;
   unregister: () => void;
 };
 
@@ -106,7 +132,6 @@ export type RegisterNativeHookRelayParams = {
   provider: NativeHookRelayProvider;
   relayId?: string;
   generation?: string;
-  generationMismatchGraceMs?: number;
   agentId?: string;
   sessionId: string;
   sessionKey?: string;

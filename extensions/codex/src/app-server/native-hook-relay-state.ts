@@ -5,6 +5,13 @@ type PendingUnregister = {
 
 const pending = new Set<PendingUnregister>();
 
+// Structural view of a relay route: keeping route types out of this module lets
+// `native-hook-relay.ts` own the registry without an import cycle.
+type CodexNativeHookRelayRouteEntry = { dispose: () => void };
+
+/** Live relay routes by relay id; routes are the only writers, test teardown only disposes. */
+export const codexNativeHookRelayOwners = new Map<string, CodexNativeHookRelayRouteEntry>();
+
 /** Owns delayed hook-relay cleanup across runtime scheduling and test teardown. */
 export const nativeHookRelayUnregisterQueue = {
   add(entry: PendingUnregister): void {
