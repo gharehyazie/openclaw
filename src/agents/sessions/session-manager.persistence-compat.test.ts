@@ -2,7 +2,7 @@
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { openFileBackedSessionManagerForTest } from "../../../test/helpers/session-manager-file-fixture.js";
 import {
   formatSqliteSessionFileMarker,
@@ -123,6 +123,28 @@ describe("SessionManager persistence compatibility", () => {
 
     expect(manager.getCwd()).toBe(process.cwd());
     expect(manager.getSessionDir()).toBe(dir);
+  });
+
+  it("binds new file fixtures to the requested session id and rejects foreign files", async () => {
+    const dir = await makeTempDir();
+    const sessionFile = path.join(dir, "session.jsonl");
+    const manager = openFileBackedSessionManagerForTest(sessionFile, {
+      sessionId: "expected-session",
+    });
+    expect(manager.getSessionId()).toBe("expected-session");
+    expect(await fs.readFile(sessionFile, "utf8")).toContain('"id":"expected-session"');
+    expect(() =>
+      openFileBackedSessionManagerForTest(sessionFile, { sessionId: "foreign-session" }),
+    ).toThrow("session fixture id expected-session does not match foreign-session");
+    const inMemory = vi.fn((cwd?: string) => SessionManager.inMemory(cwd));
+    const ManagerClass = { inMemory } as unknown as typeof SessionManager;
+    openFileBackedSessionManagerForTest(
+      path.join(dir, "legacy.jsonl"),
+      undefined,
+      dir,
+      ManagerClass,
+    );
+    expect(inMemory).toHaveBeenCalledWith(dir);
   });
 
   it("separates appended records from a final unterminated JSONL record", async () => {

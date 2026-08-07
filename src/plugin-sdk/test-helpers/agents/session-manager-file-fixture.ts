@@ -8,6 +8,13 @@ type FileBackedSessionManagerForTest = SessionManager & {
   getSessionFile(): string;
 };
 
+type OpenFileBackedSessionManagerForTestOptions = {
+  sessionId?: string;
+  sessionDir?: string;
+  cwd?: string;
+  SessionManagerClass?: typeof SessionManager;
+};
+
 // Legacy JSONL tests need observable write-through files, but the production
 // constructor must stay SQLite/in-memory only. Decorate each fixture instance.
 function attachFilePersistence(params: {
@@ -73,16 +80,31 @@ export function createFileBackedSessionManagerForTest(
 
 export function openFileBackedSessionManagerForTest(
   target: string,
-  sessionDir?: string,
+  sessionDirOrOptions?: string | OpenFileBackedSessionManagerForTestOptions,
   cwd?: string,
   SessionManagerClass: typeof SessionManager = SessionManager,
 ): FileBackedSessionManagerForTest {
+  const options =
+    typeof sessionDirOrOptions === "string"
+      ? { sessionDir: sessionDirOrOptions, cwd, SessionManagerClass }
+      : { cwd, SessionManagerClass, ...sessionDirOrOptions };
   let activeTarget = target;
-  const resolvedSessionDir = sessionDir ?? path.dirname(target);
+  const resolvedSessionDir = options.sessionDir ?? path.dirname(target);
   const exists = fs.existsSync(target);
+  const ManagerClass = options.SessionManagerClass ?? SessionManager;
   const manager = exists
-    ? SessionManagerClass.fromEntries(parseSessionEntries(fs.readFileSync(target, "utf8")), cwd)
-    : SessionManagerClass.inMemory(cwd ?? sessionDir ?? process.cwd());
+    ? ManagerClass.fromEntries(parseSessionEntries(fs.readFileSync(target, "utf8")), options.cwd)
+    : ManagerClass.inMemory(options.cwd ?? options.sessionDir ?? process.cwd());
+  if (options.sessionId) {
+    if (exists && manager.getSessionId() !== options.sessionId) {
+      throw new Error(
+        `session fixture id ${manager.getSessionId()} does not match ${options.sessionId}`,
+      );
+    }
+    if (!exists) {
+      manager.newSession({ id: options.sessionId });
+    }
+  }
   return attachFilePersistence({
     manager,
     sessionDir: resolvedSessionDir,
