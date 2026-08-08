@@ -601,7 +601,6 @@ describe("mcp cli", () => {
         config: undefined,
         fetchFn: expect.any(Function),
         authorizationCode: "abc123",
-        onAuthorizationUrl: expect.any(Function),
       });
 
       mockLog.mockClear();
