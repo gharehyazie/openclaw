@@ -277,6 +277,10 @@ function createConfig(params: {
       providers: {
         [provider.providerId]: {
           ...provider.config,
+          models: provider.config.models.map((model) => ({
+            ...model,
+            input: Array.from(model.input),
+          })),
           request: { allowPrivateNetwork: true },
         },
       },
