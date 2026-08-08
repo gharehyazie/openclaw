@@ -245,6 +245,7 @@ function runFullReleaseChildDispatch(
   const sleepPath = resolve(workdir, "sleep");
   const callsPath = resolve(workdir, "gh-calls.jsonl");
   const statusPath = resolve(workdir, "status-polls");
+  const titlePath = resolve(workdir, "title-polls");
   writeFileSync(callsPath, "");
   writeFileSync(
     ghPath,
@@ -266,6 +267,13 @@ function nextStatus() {
   try { index = Number(fs.readFileSync(env.MOCK_GH_STATUS_POLLS, "utf8")); } catch {}
   fs.writeFileSync(env.MOCK_GH_STATUS_POLLS, String(index + 1));
   return statuses[Math.min(index, statuses.length - 1)];
+}
+function nextRunTitle() {
+  const titles = JSON.parse(env.MOCK_GH_RUN_TITLES || JSON.stringify([env.MOCK_GH_RUN_TITLE]));
+  let index = 0;
+  try { index = Number(fs.readFileSync(env.MOCK_GH_TITLE_POLLS, "utf8")); } catch {}
+  fs.writeFileSync(env.MOCK_GH_TITLE_POLLS, String(index + 1));
+  return titles[Math.min(index, titles.length - 1)];
 }
 if (args[0] === "workflow" && args[1] === "run") {
   if (env.MOCK_GH_DISPATCH_ERROR) {
@@ -292,7 +300,7 @@ if (args[0] === "workflow" && args[1] === "run") {
   }
   console.log(JSON.stringify({
     conclusion,
-    display_title: env.MOCK_GH_RUN_TITLE,
+    display_title: nextRunTitle(),
     event: env.MOCK_GH_RUN_EVENT,
     head_branch: env.MOCK_GH_RUN_HEAD_BRANCH,
     head_sha: env.MOCK_GH_CHILD_SHA,
@@ -412,6 +420,7 @@ if (args[0] === "workflow" && args[1] === "run") {
       MOCK_GH_RUN_WORKFLOW_ID: "789",
       MOCK_GH_STATUSES: '["completed"]',
       MOCK_GH_STATUS_POLLS: statusPath,
+      MOCK_GH_TITLE_POLLS: titlePath,
       MOCK_GH_WORKFLOW_ID: "789",
       PATH: `${workdir}:${process.env.PATH}`,
       ...overrides,
@@ -1965,22 +1974,58 @@ describe("package acceptance workflow", () => {
   });
 
   it.each([
-    ["workflow", { MOCK_GH_RUN_WORKFLOW_ID: "790" }],
-    ["title", { MOCK_GH_RUN_TITLE: "Unrelated workflow run" }],
+    ["workflow id", { MOCK_GH_RUN_WORKFLOW_ID: "790" }],
     ["head branch", { MOCK_GH_RUN_HEAD_BRANCH: "other" }],
     ["event", { MOCK_GH_RUN_EVENT: "push" }],
-  ] as const)("refuses a returned run URL with the wrong %s", (label, overrides) => {
+  ] as const)("refuses a returned run URL with the wrong %s", (_label, overrides) => {
     const { calls, result } = runFullReleaseChildDispatch(FULL_RELEASE_CHILD_DISPATCHES[0], {
       MOCK_GH_DISPATCH_OUTPUT: "https://github.com/openclaw/openclaw/actions/runs/101",
       ...overrides,
     });
 
     expect(result.status).toBe(1);
+    expect(result.stderr).toContain("Refusing to adopt unvalidated ci.yml run 101");
+    expect(
+      calls.filter(({ args }) => args.some((value) => value.endsWith("/actions/runs/101"))),
+    ).toHaveLength(1);
+    expect(
+      calls.some(({ args }) =>
+        args.some((value) => value.includes("/actions/workflows/") && value.endsWith("/runs")),
+      ),
+    ).toBe(false);
+    expect(calls.filter(({ args }) => args[0] === "run" && args[1] === "cancel")).toHaveLength(0);
+  });
+
+  it("retries a returned run URL whose display title never matches", () => {
+    const { calls, result } = runFullReleaseChildDispatch(FULL_RELEASE_CHILD_DISPATCHES[0], {
+      MOCK_GH_DISPATCH_OUTPUT: "https://github.com/openclaw/openclaw/actions/runs/101",
+      MOCK_GH_RUN_TITLE: "Unrelated workflow run",
+    });
+
+    expect(result.status).toBe(1);
     expect(result.stderr).toContain(
-      label === "title"
-        ? "Refusing to adopt ci.yml run 101: display title never matched"
-        : "Refusing to adopt unvalidated ci.yml run 101",
+      "::error::Refusing to adopt ci.yml run 101: display title never matched CI full-release-validation-77-2-ci.",
     );
+    expect(
+      calls.filter(({ args }) => args.some((value) => value.endsWith("/actions/runs/101"))),
+    ).toHaveLength(12);
+    expect(
+      calls.some(({ args }) =>
+        args.some((value) => value.includes("/actions/workflows/") && value.endsWith("/runs")),
+      ),
+    ).toBe(false);
+    expect(calls.filter(({ args }) => args[0] === "run" && args[1] === "cancel")).toHaveLength(0);
+  });
+
+  it("adopts a returned run URL once its display title matches", () => {
+    const { calls, result } = runFullReleaseChildDispatch(FULL_RELEASE_CHILD_DISPATCHES[0], {
+      MOCK_GH_DISPATCH_OUTPUT: "https://github.com/openclaw/openclaw/actions/runs/101",
+      MOCK_GH_RUN_TITLES: JSON.stringify(["CI", "CI full-release-validation-77-2-ci"]),
+    });
+
+    expect(result.status, `${result.stdout}\n${result.stderr}`).toBe(0);
+    expect(result.stderr).toContain("display title (attempt 1)");
+    expect(result.stderr).not.toContain("display title (attempt 2)");
     expect(
       calls.some(({ args }) =>
         args.some((value) => value.includes("/actions/workflows/") && value.endsWith("/runs")),
