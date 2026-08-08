@@ -456,12 +456,20 @@ describe("runReplyAgent media path normalization", () => {
   });
 
   it("steers active non-streaming prompts in steer queue mode", async () => {
-    queueEmbeddedAgentMessageWithOutcomeAsyncMock.mockImplementation(async (sessionId: string) => ({
-      queued: true,
-      sessionId,
-      target: "embedded_run",
-      gatewayHealth: "live",
-    }));
+    queueEmbeddedAgentMessageWithOutcomeAsyncMock.mockImplementation(
+      async (sessionId: string, _text: string, options?: unknown) => {
+        const onQueueAccepted = (
+          options as { onQueueAccepted?: (accepted: boolean) => void } | undefined
+        )?.onQueueAccepted;
+        onQueueAccepted?.(true);
+        return {
+          queued: true,
+          sessionId,
+          target: "embedded_run",
+          gatewayHealth: "live",
+        };
+      },
+    );
     const followupRun = createMockFollowupRun({ prompt: "generate chart" });
     followupRun.run.taskSuggestionDeliveryMode = "gateway";
 
@@ -484,11 +492,12 @@ describe("runReplyAgent media path normalization", () => {
         isInboundUserMessage: true,
         waitForTranscriptCommit: true,
         queueIdentity: EXPECTED_STEER_QUEUE_IDENTITY,
-        onQueueAccepted: parkedSteerAcceptedMock,
+        onQueueAccepted: expect.any(Function),
         taskSuggestionDeliveryMode: "gateway",
       },
     );
     expect(enqueueFollowupRunMock).not.toHaveBeenCalled();
+    expect(parkedSteerAcceptedMock).toHaveBeenCalledWith(true);
     expect(parkedSteerConsumeMock).toHaveBeenCalledOnce();
     expect(parkedSteerFallbackMock).not.toHaveBeenCalled();
   });
@@ -530,7 +539,7 @@ describe("runReplyAgent media path normalization", () => {
         isInboundUserMessage: true,
         waitForTranscriptCommit: true,
         queueIdentity: EXPECTED_STEER_QUEUE_IDENTITY,
-        onQueueAccepted: parkedSteerAcceptedMock,
+        onQueueAccepted: expect.any(Function),
         images,
         media: followupRun.media,
         taskSuggestionDeliveryMode: undefined,
@@ -613,7 +622,7 @@ describe("runReplyAgent media path normalization", () => {
         isInboundUserMessage: true,
         waitForTranscriptCommit: true,
         queueIdentity: EXPECTED_STEER_QUEUE_IDENTITY,
-        onQueueAccepted: parkedSteerAcceptedMock,
+        onQueueAccepted: expect.any(Function),
         taskSuggestionDeliveryMode: undefined,
       },
     );
